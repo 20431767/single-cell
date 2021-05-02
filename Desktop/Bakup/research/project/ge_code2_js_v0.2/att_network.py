@@ -252,8 +252,8 @@ class Model(object):
             self.imp_loss += lambda_d *_build_reg_b(self.x,self.batch_labels)  # Add MMD Regularization to remove Batch effect
         if lambda_e is not None:
             #nproto = self.landmk_tr.shape[0]
-            Loss_i = tf.reduce_sum(input_tensor = tf.sqrt(tf.reduce_sum(self.encoder_sub- self.prototype)**2))
-            Loss_u = tf.reduce_min(input_tensor = tf.sqrt(tf.reduce_sum(self.encoder_test - self.landmk_test)**2)) + tf.reduce_sum(input_tensor = tf.sqrt(self.landmk_test - self.landmk_test))
+            Loss_i = tf.reduce_sum(input_tensor = tf.sqrt(tf.reduce_mean(self.encoder_sub)- self.prototype)**2)
+            Loss_u = tf.reduce_min(input_tensor = tf.sqrt(tf.reduce_mean(self.encoder_test) - self.landmk_test)**2) + tf.reduce_sum(input_tensor = tf.sqrt(self.landmk_test - self.landmk_test))
             self.mars_loss = self.imp_loss + Loss_i + lambda_e * Loss_u
         self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
@@ -506,7 +506,7 @@ class Model(object):
                     self.encoder_sub : sub_latent,
                     self.prototype   : sub_landmk_tr,
                     self.encoder_test: encoded_test,
-                    self.landmk_test : sub_landmk_tr,  #Todo
+                    self.landmk_test : landmk_test,
                     })
 
             encoded_tr[index] = latent
@@ -584,21 +584,21 @@ class Model(object):
             prob = np.divide(prob, normalizat)
             
             #Todo
-            # uniq_tr = np.unique(landmk_tr_labels)
-            # prob_unique = []
-            # for cell_type in uniq_tr: # sum probabilities of same landmarks
-            #     print("cell_type:",cell_type)
-            #     print("landmk_tr_labels:",landmk_tr_labels)
-            #     prob_unique.append(np.sum(prob[np.where(landmk_tr_labels==cell_type)]))
+            uniq_tr = np.unique(landmk_tr_labels)
+            prob_unique = []
+            for cell_type in uniq_tr: # sum probabilities of same landmarks
+                print("cell_type:",cell_type)
+                print("landmk_tr_labels:",landmk_tr_labels)
+                prob_unique.append(np.sum(prob[np.where(landmk_tr_labels==cell_type)]))
             
-            # sorted = np.argsort(prob_unique, axis=0)
-            # top_match = 5
-            # best = uniq_tr[sorted[-top_match:]]
-            # sortedv = np.sort(prob_unique, axis=0)
-            # sortedv = sortedv[-top_match:]
-            # for idx, b in enumerate(best):
-            #     interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
-            #     print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
+            sorted = np.argsort(prob_unique, axis=0)
+            top_match = 5
+            best = uniq_tr[sorted[-top_match:]]
+            sortedv = np.sort(prob_unique, axis=0)
+            sortedv = sortedv[-top_match:]
+            for idx, b in enumerate(best):
+                interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
+                print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
                 
         return interp_names
 
