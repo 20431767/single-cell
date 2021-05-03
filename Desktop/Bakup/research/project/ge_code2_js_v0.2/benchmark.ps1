@@ -1,7 +1,7 @@
 #$repeat_num=10
 $repeat_num=1
 #$data_dir="J:\cgi_datasets"
-$data_dir="C:\Users\Administrator\Desktop\Bakup\research\project\dataset"
+$data_dir="H:\data\data\"
 $dataset_dirs="cellbench_kolod_pollen"
 #$dataset_dirs="human_pancreas", "human_progenitor"
 #$dataset_dirs="human_pancreas", "human_progenitor", "mouse_cortex", "human_melanoma", "mouse_stem", "mouse_pancreas", "mouse_blastomeres", "human_cell_line", "human_colorectal_cancer", "mouse_embryos", "mouse_pancreatic_circulating_tumor", "human_embryos"

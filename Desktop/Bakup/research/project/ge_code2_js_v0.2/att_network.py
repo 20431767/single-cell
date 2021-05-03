@@ -455,9 +455,9 @@ class Model(object):
     def Build_MARS(self,X,unscale_X,nonzero_mask,count_X,sess,latent_repre,Exp,Y_target):
         # latent_repre: output of hidder layerr for all experiments
         # Exp: label of experiments
-        encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels = self.init_landmark(latent_repre,Exp,Y_target)
+        encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,cell_name_mappings = self.init_landmark(latent_repre,Exp,Y_target)
         encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,acc,Y_pred = self.Run_MARS(sess,X,unscale_X,nonzero_mask,count_X,Exp,encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels)
-        self.name_cell_types(encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,Y_pred,Exp)
+        self.name_cell_types(encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,Y_pred,Exp,cell_name_mappings)
         return Y_pred
 
     def compute_kmean(self,latent_repre,n_clusters,pre_clusters=None,inherit_centroids = False,linkage = "ward"):
@@ -552,7 +552,10 @@ class Model(object):
         landmk_test  = np.squeeze(np.array(landmk_test))
         landmk_tr_labels = np.squeeze(np.array(landmk_tr_labels))
         landmk_test_labels = np.squeeze(np.array(landmk_test_labels))
-        return encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels
+
+        cell_name_mappings = np.unique(landmk_tr_labels)
+        print("cell_name_mappings:",cell_name_mappings)
+        return encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,cell_name_mappings
 
     def estimate_sigma(self,dataset):
         nex = dataset.shape[0]
@@ -562,7 +565,7 @@ class Model(object):
                 dst.append(distance.euclidean(dataset[i,:],dataset[j,:]))
         return np.std(dst)
 
-    def name_cell_types(self,encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,Y_pred,Exp):
+    def name_cell_types(self,encoded_tr,landmk_tr,landmk_tr_labels,encoded_test,landmk_test,landmk_test_labels,Y_pred,Exp,cell_name_mappings):
 
         interp_names = defaultdict(list)
         ypred_test = Y_pred[np.where(Exp == unannotated_exp)]
@@ -571,12 +574,15 @@ class Model(object):
             print('\nCluster label: {}'.format(str(ytest)))
             idx = np.where(ypred_test==ytest)
             subset_encoded = encoded_test[idx[0],:]
+            print("subset_encoded.shape",subset_encoded.shape)
             mean = np.expand_dims(np.mean(subset_encoded, axis=0),0)
             
             sigma  = self.estimate_sigma(subset_encoded)
             prob = np.exp(-np.power(distance.cdist(mean, landmk_tr, metric='euclidean'),2)/(2*sigma*sigma))
             prob = np.squeeze(prob, 0)
             normalizat = np.sum(prob)
+            print("mean.shape:",mean.shape)
+            print("sigma.shape:",sigma)
             if normalizat==0:
                 print('Unassigned')
                 interp_names[ytest].append("unassigned")
@@ -596,9 +602,9 @@ class Model(object):
             best = uniq_tr[sorted[-top_match:]]
             sortedv = np.sort(prob_unique, axis=0)
             sortedv = sortedv[-top_match:]
-            # for idx, b in enumerate(best):
-            #     interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
-            #     print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
+            for idx, b in enumerate(best):
+                interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
+                print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
                 
         return interp_names
 
