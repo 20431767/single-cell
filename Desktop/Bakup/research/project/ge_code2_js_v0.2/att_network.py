@@ -513,6 +513,7 @@ class Model(object):
 
             #annotated experiment
             Y_pred[index],cluster_centers = self.compute_kmean(latent,len(np.unique(sub_landmk_tr_labels)),sub_landmk_tr)
+            Y_pred[index] = j
             landmk_tr[j] = cluster_centers
 
             #unannotated experiment
@@ -585,20 +586,19 @@ class Model(object):
             
             #Todo
             uniq_tr = np.unique(landmk_tr_labels)
-            prob_unique = []
-            for cell_type in uniq_tr: # sum probabilities of same landmarks
-                print("cell_type:",cell_type)
-                print("landmk_tr_labels:",landmk_tr_labels)
-                prob_unique.append(np.sum(prob[np.where(landmk_tr_labels==cell_type)]))
+            prob_unique = prob
+            # prob_unique = []
+            # for cell_type in uniq_tr: # sum probabilities of same landmarks
+            #     prob_unique.append(np.sum(prob[np.where(landmk_tr_labels==cell_type)]))
             
             sorted = np.argsort(prob_unique, axis=0)
             top_match = 5
             best = uniq_tr[sorted[-top_match:]]
             sortedv = np.sort(prob_unique, axis=0)
             sortedv = sortedv[-top_match:]
-            for idx, b in enumerate(best):
-                interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
-                print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
+            # for idx, b in enumerate(best):
+            #     interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
+            #     print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
                 
         return interp_names
 
@@ -614,7 +614,6 @@ def draw_TSNE(x,label,batch,dir,index = 1):
     # t-SNE的降维与可视化
     ts = sklearn.manifold.TSNE(n_components=2, init='pca', random_state=0)
     # 训练模型
-    print("x.shape000",x.shape)
     y = ts.fit_transform(x)
     ax1 = fig.add_subplot(2, 2, index)
     #Batch 1
