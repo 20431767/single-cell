@@ -205,7 +205,7 @@ class Model(object):
         self.cluster_labels = tf.compat.v1.placeholder(dtype=tf.int32, shape=(None))
         self.batch_labels = tf.compat.v1.placeholder(dtype=tf.int32, shape=(None, ))
         self.encoder_sub = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[-1]))
-        self.prototype   = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[-1] ))
+        self.landmk_tr   = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[-1] ))
         self.encoder_test= tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[-1]))
         self.landmk_test   = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[-1]))
 
@@ -250,10 +250,13 @@ class Model(object):
         self.imp_loss += lambda_b * tf.reduce_sum(-self.select_m * tf.math.log(self.select_m)) + lambda_c * tf.reduce_sum(self.select_m)
         if lambda_d is not None:
             self.imp_loss += lambda_d *_build_reg_b(self.x,self.batch_labels)  # Add MMD Regularization to remove Batch effect
+        
         if lambda_e is not None:
-            #nproto = self.landmk_tr.shape[0]
-            Loss_i = tf.reduce_sum(input_tensor = tf.sqrt(tf.reduce_mean(self.encoder_sub)- self.prototype)**2)
-            Loss_u = tf.reduce_min(input_tensor = tf.sqrt(tf.reduce_mean(self.encoder_test) - self.landmk_test)**2) + tf.reduce_sum(input_tensor = tf.sqrt(self.landmk_test - self.landmk_test))
+            self.tr_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_sub,axis = 1)- tf.expand_dims(self.landmk_tr,axis = 0))**2),axis = -1)
+            Loss_i = tf.reduce_sum(self.tr_dist)
+
+            self.test_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_test, axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1)
+            Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(input_tensor = tf.sqrt(tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0)))
             self.mars_loss = self.imp_loss + Loss_i + lambda_e * Loss_u
         self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
@@ -497,27 +500,39 @@ class Model(object):
             sub_latent = encoded_tr[index]
             sub_landmk_tr = np.expand_dims(landmk_tr[j],axis = 0)
             sub_landmk_tr_labels = landmk_tr_labels[index]
+            #print("encoder_test.shape:",encoded_test.shape)
+            #print("landmk_test.shape:",landmk_test.shape)
 
-            _,latent, imp_loss = sess.run([self.mars_op,self.h ,self.mars_loss],
+            _,latent, imp_loss,tr_dist,test_dist = sess.run([self.mars_op,self.h ,self.mars_loss, self.tr_dist, self.test_dist],
             feed_dict= {self.x: X[index],
                     self.unscale_x: unscale_X[index],
                     self.non_zero_mask: nonzero_mask[index],
                     self.x_count: count_X[index],
                     self.encoder_sub : sub_latent,
-                    self.prototype   : sub_landmk_tr,
+                    self.landmk_tr   : landmk_tr,
                     self.encoder_test: encoded_test,
                     self.landmk_test : landmk_test,
                     })
 
             encoded_tr[index] = latent
 
+            # print("sub_latent.shape:",sub_latent.shape)
+            # print("landmk_tr.shape:",landmk_tr.shape)
+            # print("encoded_test.shape:",encoded_test.shape)
+            # print("landmk_test.shape:",landmk_test.shape)
+            # print("tr_dist.shape:",tr_dist.shape)
+            # print("tr_dist:",tr_dist)
+            # print("test_dist.shape:",test_dist.shape)
+            # print("test_dist:",test_dist)
+
             #annotated experiment
-            Y_pred[index],cluster_centers = self.compute_kmean(latent,len(np.unique(sub_landmk_tr_labels)),sub_landmk_tr)
-            Y_pred[index] = j
+            _,cluster_centers = self.compute_kmean(latent,len(np.unique(sub_landmk_tr_labels)),sub_landmk_tr)
+            Y_pred[index] = np.argmax(-tr_dist,axis = 1)
             landmk_tr[j] = cluster_centers
 
             #unannotated experiment
-            Y_pred[index_unannotated],cluster_centers = self.compute_kmean(encoded_test,len(np.unique(landmk_test_labels)),landmk_test)
+            _,cluster_centers = self.compute_kmean(encoded_test,len(np.unique(landmk_test_labels)),landmk_test)
+            Y_pred[index_unannotated] = np.argmax(-test_dist,axis = 1)
             landmk_test = cluster_centers
 
         mean_acc_tr = total_acc_tr / len(np.unique(Exp))
@@ -540,11 +555,13 @@ class Model(object):
             if exp == unannotated_exp: # unannotated experiments
                 encoded_test.append(latent_uni)
                 landmk_test.append(cluster_centers)
-                landmk_test_labels.append(Y_pred)
+                #landmk_test_labels.append(Y_pred)
+                landmk_test_labels.append(Y_target[index])
             else:
                 encoded_tr.append(latent_uni)
                 landmk_tr.append(cluster_centers)
-                landmk_tr_labels.append(Y_pred)
+                #landmk_tr_labels.append(Y_pred)
+                landmk_tr_labels.append(Y_target[index])
         
         encoded_tr = np.squeeze(np.array(encoded_tr))
         encoded_test = np.squeeze(np.array(encoded_test))
@@ -552,6 +569,8 @@ class Model(object):
         landmk_test  = np.squeeze(np.array(landmk_test))
         landmk_tr_labels = np.squeeze(np.array(landmk_tr_labels))
         landmk_test_labels = np.squeeze(np.array(landmk_test_labels))
+        #print("landmk_tr:",landmk_tr.shape)
+        #print("landmk_test:",landmk_test.shape)
 
         cell_name_mappings = np.unique(landmk_tr_labels)
         print("cell_name_mappings:",cell_name_mappings)
@@ -574,7 +593,7 @@ class Model(object):
             print('\nCluster label: {}'.format(str(ytest)))
             idx = np.where(ypred_test==ytest)
             subset_encoded = encoded_test[idx[0],:]
-            print("subset_encoded.shape",subset_encoded.shape)
+            #print("subset_encoded.shape",subset_encoded.shape)
             mean = np.expand_dims(np.mean(subset_encoded, axis=0),0)
             
             sigma  = self.estimate_sigma(subset_encoded)
@@ -602,7 +621,7 @@ class Model(object):
             best = uniq_tr[sorted[-top_match:]]
             sortedv = np.sort(prob_unique, axis=0)
             sortedv = sortedv[-top_match:]
-            for idx, b in enumerate(best):
+            for idx, b in enumerate(best,start = -1):
                 interp_names[ytest].append((cell_name_mappings[b], sortedv[idx]))
                 print('{}: {}'.format(cell_name_mappings[b], sortedv[idx]))
                 
