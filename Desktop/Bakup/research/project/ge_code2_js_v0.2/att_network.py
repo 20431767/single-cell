@@ -255,8 +255,8 @@ class Model(object):
             self.tr_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_sub,axis = 1)- tf.expand_dims(self.landmk_tr,axis = 0))**2),axis = -1)
             Loss_i = tf.reduce_sum(self.tr_dist)
 
-            self.test_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_test, axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1)
-            Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(input_tensor = tf.sqrt(tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0)))
+            self.test_dist = tf.reduce_min(tf.sqrt((tf.expand_dims(self.encoder_test, axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1)
+            Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(tf.reduce_sum(input_tensor = tf.sqrt((tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1))
             self.mars_loss = self.imp_loss + Loss_i + lambda_e * Loss_u
         self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
@@ -500,10 +500,10 @@ class Model(object):
             sub_latent = encoded_tr[index]
             sub_landmk_tr = np.expand_dims(landmk_tr[j],axis = 0)
             sub_landmk_tr_labels = landmk_tr_labels[index]
-            #print("encoder_test.shape:",encoded_test.shape)
-            #print("landmk_test.shape:",landmk_test.shape)
+            # print("encoder_test.shape:",encoded_test.shape)
+            # print("landmk_test.shape:",landmk_test.shape)
 
-            _,latent, imp_loss,tr_dist,test_dist = sess.run([self.mars_op,self.h ,self.mars_loss, self.tr_dist, self.test_dist],
+            _,latent, mars_loss,tr_dist,test_dist = sess.run([self.mars_op,self.h ,self.mars_loss, self.tr_dist, self.test_dist],
             feed_dict= {self.x: X[index],
                     self.unscale_x: unscale_X[index],
                     self.non_zero_mask: nonzero_mask[index],
@@ -524,6 +524,8 @@ class Model(object):
             # print("tr_dist:",tr_dist)
             # print("test_dist.shape:",test_dist.shape)
             # print("test_dist:",test_dist)
+            # print("mars_loss.shape",mars_loss.shape)
+            # print("mars_loss:",mars_loss)
 
             #annotated experiment
             _,cluster_centers = self.compute_kmean(latent,len(np.unique(sub_landmk_tr_labels)),sub_landmk_tr)
