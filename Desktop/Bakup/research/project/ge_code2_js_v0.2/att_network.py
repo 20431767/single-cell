@@ -255,8 +255,9 @@ class Model(object):
             self.tr_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_sub,axis = 1)- tf.expand_dims(self.landmk_tr,axis = 0))**2),axis = -1)
             Loss_i = tf.reduce_sum(self.tr_dist)
 
+            nproto = 14
             self.test_dist = tf.reduce_min(tf.sqrt((tf.expand_dims(self.encoder_test, axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1)
-            Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(tf.reduce_sum(input_tensor = tf.sqrt((tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1))
+            Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(tf.reduce_sum(input_tensor = tf.sqrt((tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1))/(nproto*nproto-nproto)
             self.mars_loss = self.imp_loss + Loss_i + lambda_e * Loss_u
         self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
