@@ -173,7 +173,7 @@ def _build_reg_b(embedded,batches,Y_labels = None):
     K = K / tf.reduce_max(K)
     K = _gaussian_kernel_matrix(K)
 
-    if Y_labels is not None:  # reference batch
+    if Y_labels is not None:  # reference batch with similar cell type
         sc_types_set = [0,1]
         #sc_types_set, sc_types_label = tf.unique(Y)
         for k in sc_types_set:
@@ -245,8 +245,6 @@ def _build_reg_b(embedded,batches,Y_labels = None):
         mmd_pair = var_within[i] + var_within[j] - 2 * K_12_ / (batch_sizes[i] * batch_sizes[j])
         loss_b += tf.abs(mmd_pair) * 1e6
 
-    #self.loss_b = self.lambda_b * (self.loss_b)
-    #self.loss_b = nameop(self.loss_b, 'loss_b')
     return loss_b
 ##################################################
 
@@ -280,29 +278,18 @@ class Model(object):
         self.unscale_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[0]))
         self.x_count = tf.compat.v1.placeholder(dtype=tf.float32, shape=(None, self.dims[0]))
         self.clusters = tf.compat.v1.get_variable(name=self.dataname + "/clusters_rep", shape=[self.cluster_num, self.dims[-1]],dtype=tf.float32, initializer=tf.compat.v1.glorot_uniform_initializer())
-        # self.gene_embs = tf.nn.relu(tf.compat.v1.get_variable(name=self.dataname + "/ge", shape=[self.dims[0], self.dims[1]],dtype=tf.float32, initializer=tf.glorot_uniform_initializer()))
         self.gene_b = tf.nn.relu(tf.compat.v1.get_variable(name=self.dataname + "/gb", shape=[ self.dims[0]],dtype=tf.float32, initializer=tf.compat.v1.glorot_uniform_initializer()))
         self.GRN = tf.compat.v1.get_variable( name='grn',shape=[ self.dims[0],self.dims[0]],dtype=tf.float32, initializer=tf.compat.v1.glorot_uniform_initializer())
 
 
-#        self.h = tf.concat([self.x, self.batch], axis=1)##change!
         self.select_m_h =tf.nn.relu(Dense(units=self.dims[-1], kernel_initializer=self.init, name='encoder_m_h')(self.x))
         self.select_m = tf.nn.sigmoid(Dense(units=self.dims[0], kernel_initializer=self.init, name='encoder_m' )(self.select_m_h))
         self.select_w_h =tf.nn.relu(Dense(units=self.dims[-1], kernel_initializer=self.init, name='encoder_w_h')(self.x))
         self.select_w = tf.nn.sigmoid(Dense(units=self.dims[0], kernel_initializer=self.init, name='encoder_w' )(self.select_w_h))
- #       self.h = tf.multiply(self.x,self.select_m)
- #       self.h=tf.nn.relu(Dense(units=self.dims[-1], kernel_initializer=self.init, name='encoddsdd')(self.x))
         self.h = tf.multiply(self.x,self.select_m)
-        # self.h = tf.multiply(self.x, tf.multiply(self.select_w, self.select_m))
-#        self.h = self.x
         self.h = GaussianNoise(self.noise_sd, name='input_noise')(self.h)
-        
         self.h = Dense(units=self.dims[-1], kernel_initializer=self.init, name='encoder_hidden')(self.h)
-#        self.h0=self.latent
-  #      self.latent=tf.nn.relu(self.h0)
-#        self.normalize_latent = tf.nn.l2_normalize(self.latent, axis=1)
-        # self.h = tf.concat([self.latent, self.batch], axis=1)#chhange
-#        self.h = self.latent
+
 
         self.auto_decode_X = Dense(units=self.dims[0],  activation=imAct, kernel_initializer=self.init, name='imX')(self.h)
 
@@ -316,14 +303,15 @@ class Model(object):
         self.imp_loss = tf.reduce_sum(input_tensor=tf.multiply((self.imX-self.unscale_x)**2/tf.reshape(tf.reduce_sum(input_tensor=self.non_zero_mask,axis=1),(-1,1)),self.non_zero_mask)) + \
                         tf.reduce_sum(input_tensor=tf.multiply((self.auto_decode_X-self.unscale_x)**2/tf.reshape(tf.reduce_sum(input_tensor=self.non_zero_mask,axis=1),(-1,1)),self.non_zero_mask ))
         
-        #self.imp_loss += lambda_b * tf.reduce_sum(-self.select_m * tf.math.log(self.select_m)) + lambda_c * tf.reduce_sum(self.select_m)
-        if lambda_d is not None:
-            #self.imp_loss += lambda_d *_build_reg_b(self.x,self.batch_labels)  # Add MMD Regularization to remove Batch effect
-        	#self.mmd_loss = _build_reconstruction_loss_mmd(self.auto_decode_X, self.unscale_x, self.batch_labels)
-            #self.imp_mmd_loss = self.mmd_loss = lambda_d *_build_reg_b(self.h,self.batch_labels)
-            self.imp_mmd_loss = lambda_d *_build_reg_b(self.h,self.batch_labels,self.Y_labels) +  0.1*self.imp_loss
+        self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
+        self.moptimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
         
-        if lambda_e is not None:
+        if lambda_d is not None: #batch-effect
+            self.imp_mmd_loss = lambda_d *_build_reg_b(self.h,self.batch_labels) +  0.1*self.imp_loss
+            self.imp_mmd_op = self.optimizer.minimize(self.imp_mmd_loss)
+        
+        if lambda_e is not None: #MARS
             self.tr_dist = tf.reduce_mean(tf.sqrt((tf.expand_dims(self.encoder_sub,axis = 1)- tf.expand_dims(self.landmk_tr,axis = 0))**2),axis = -1)
             Loss_i = tf.reduce_sum(self.tr_dist)
 
@@ -331,17 +319,12 @@ class Model(object):
             self.test_dist = tf.reduce_min(tf.sqrt((tf.expand_dims(self.encoder_test, axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1)
             Loss_u = tf.reduce_sum(self.test_dist) + tf.reduce_sum(tf.reduce_sum(input_tensor = tf.sqrt((tf.expand_dims(self.landmk_test,axis = 1) - tf.expand_dims(self.landmk_test,axis = 0))**2),axis = -1))/(nproto*nproto-nproto)
             self.mars_loss = self.imp_loss + Loss_i + lambda_e * Loss_u
-        self.cluster_loss=self.imp_loss+tf.reduce_sum(input_tensor=(self.h-tf.nn.embedding_lookup(params=self.cluster_centers,ids=self.cluster_labels))**2)
-        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
-        self.moptimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
-
-        #self.mmd_op = self.optimizer.minimize(self.mmd_loss)
-        self.imp_mmd_op = self.optimizer.minimize(self.imp_mmd_loss)
-        self.pretrain_op = self.optimizer.minimize(self.imp_loss)
-        self.cluster_op = self.optimizer.minimize(self.cluster_loss)
-        self.mars_op = self.optimizer.minimize(self.mars_loss)
+            self.mars_op = self.optimizer.minimize(self.mars_loss)
         
 
+        self.pretrain_op = self.optimizer.minimize(self.imp_loss)
+        self.cluster_op = self.optimizer.minimize(self.cluster_loss)
+        
     def train(self, adata, adata_unscaled, adata_cnt, split, epochs, random_seed, inherit_centroids, L2, linkage, gpu_option,type_to_mg=None):
 
         X = adata.X[:split].astype(np.float32)
@@ -349,14 +332,11 @@ class Model(object):
         count_X = adata_cnt.X[:split].astype(np.float32)
         Y = adata.obs["cell_groups"][:split]
         if 'batch' in adata.obs:  #batch labels
-            Z = adata.obs["batch"][:split]  
-        else:  # No Batch Information
+            Z = adata.obs["batch"][:split] 
+        elif 'experiment' in adata.obs:  # experiment
+            Z = adata.obs["experiment"][:split]
+        else :
             Z = np.full(shape = Y.shape, fill_value = 1, dtype = np.float)
-
-        if 'experiment' in adata.obs:  # experiment
-            Exp = adata.obs["experiment"][:split]
-        else: 
-            Exp = np.full(shape = Y.shape, fill_value = 1, dtype = np.float)
 
         test_X = adata.X[split:].astype(np.float32)
         unscale_test_X = adata_unscaled.X[split:].astype(np.float32)
@@ -396,9 +376,7 @@ class Model(object):
 
         fig = plt.figure(figsize=(8, 8))		# 指定图像的宽和高
         plt.suptitle("Simulation_R", fontsize=14)		# 自定义图像名称
-    
-        ax1 = fig.add_subplot(2, 2, 1).title.set_text("Raw Data")
-        _scatter(X,Y_target,Z)
+        fig = draw_TSNE(fig,X,Y_target,Z,index=1,subtitle = "Raw Data")
 
         # print("begin model pretrain(imputation)")
         latent_repre = np.zeros((X.shape[0], self.dims[-1]))
@@ -417,55 +395,46 @@ class Model(object):
             kmeans = KMeans(n_clusters=n_clusters, init="k-means++")
             kmeans.fit(h)
             pre_clusters=kmeans.cluster_centers_
-            #print("pre_clusters:",pre_clusters)
-            # kmeans2 = KMeans(n_clusters=n_clusters, init="k-means++")
-            # print(sm,np.array(sm)[0].shape)
-            # Y_pred2 = kmeans2.fit_predict(np.array(sm))
-            # pre_clusters2=kmeans2.cluster_centers_
 
-        if 1:
-            if 1:
-                # Step1 Imputation
-                print("begin model pretrain(Imputation)")
-                for i in range(pretrain_epochs):
-                    for j in range(iteration_per_epoch):
-                        batch_idx = random.sample(range(X.shape[0]), batch_size)
-                
-                        _,latent, imp_loss = sess.run([self.pretrain_op,self.h ,self.imp_loss],
-                        feed_dict= {self.x: X[batch_idx],
-                            self.unscale_x: unscale_X[batch_idx],
-                            self.non_zero_mask: nonzero_mask[batch_idx],
-                            self.x_count: count_X[batch_idx],
+        # Stage: Imputation
+        print("begin model pretrain(Imputation)")
+        for i in range(pretrain_epochs):
+            for j in range(iteration_per_epoch):
+                batch_idx = random.sample(range(X.shape[0]), batch_size)
+        
+                _,latent, imp_loss = sess.run([self.pretrain_op,self.h ,self.imp_loss],
+                feed_dict= {self.x: X[batch_idx],
+                    self.unscale_x: unscale_X[batch_idx],
+                    self.non_zero_mask: nonzero_mask[batch_idx],
+                    self.x_count: count_X[batch_idx],
+                    })
+                latent_repre[batch_idx] = latent
+    
+            h,sm  = sess.run([self.h,self.select_m],
+                        feed_dict={
+                            self.x: X,
+                            self.unscale_x: unscale_X,
                             })
-                        latent_repre[batch_idx] = latent
-            
-                    h,sm  = sess.run([self.h,self.select_m],
-                                feed_dict={
-                                    self.x: X,
-                                    self.unscale_x: unscale_X,
-                                    })
 
-                    latent_repre = np.nan_to_num(latent_repre)
-                    if L2:
-                        latent_repre = normalize(latent_repre)
-                    if inherit_centroids:
-                        kmeans = KMeans(n_clusters=n_clusters, init=pre_clusters, n_init=1)
-                        kmeans.fit(latent_repre)
-                        pre_clusters=kmeans.cluster_centers_
-                    print(pretrain_epochs,i,'imputation loss',imp_loss)
+            latent_repre = np.nan_to_num(latent_repre)
+            if L2:
+                latent_repre = normalize(latent_repre)
+            if inherit_centroids:
+                kmeans = KMeans(n_clusters=n_clusters, init=pre_clusters, n_init=1)
+                kmeans.fit(latent_repre)
+                pre_clusters=kmeans.cluster_centers_
+            print(pretrain_epochs,i,'imputation loss',imp_loss)
 
-                ax1 = fig.add_subplot(2, 2, 3).title.set_text("Step1:Imputation")
-                _scatter(latent_repre,Y_target,Z)
+        fig = draw_TSNE(fig, latent_repre,Y_target,Z,index=2,subtitle="Imputation",_inherit_centroids = inherit_centroids,_L2 = L2)
             
-            # Step2 MMD + 0.01 * Imputation
-            #X = latent_repre
-            #self.h = latent_repre
+        # Stage: MMD + 0.01 * Imputation
+        if 'batch' in adata.obs:  #batch labels
             print("begin model pretrain(MMD+ 0.01*Imputation)")
             for i in range(pretrain_epochs):
                 for j in range(iteration_per_epoch):
                     batch_idx = random.sample(range(X.shape[0]), batch_size)
             
-                    if 0:
+                    if 1:
                         _,latent, imp_loss = sess.run([self.imp_mmd_op,self.h ,self.imp_mmd_loss],
                         feed_dict= {self.x: X[batch_idx],
                             self.unscale_x: unscale_X[batch_idx],
@@ -476,11 +445,10 @@ class Model(object):
                             })
                         latent_repre[batch_idx] = latent
                     else:
-                        _,latent, imp_loss = sess.run([self.imp_mmd_op,self.h,self.imp_mmd_loss],
+                        _,latent = sess.run([self.imp_mmd_op,self.h,self.imp_mmd_loss],
                         feed_dict= {
                             self.x : X[batch_idx],
                             self.batch_labels : Z[batch_idx],
-                            #self.Y_labels : Y_target[batch_idx]
                             })
                         latent_repre[batch_idx] = latent
         
@@ -492,104 +460,7 @@ class Model(object):
                     kmeans.fit(latent_repre)
                     pre_clusters=kmeans.cluster_centers_
                 print(pretrain_epochs,i,'mmd loss',imp_loss)
-            ax1 = fig.add_subplot(2, 2, 2).title.set_text("MMD+ 0.01*Imputation")
-            _scatter(latent_repre,Y_target,Z)
-
-        #     if 0:
-        #         # Step2 Imputation
-        #         X = latent_repre
-        #         print("begin model pretrain(Imputation)")
-        #         for i in range(pretrain_epochs):
-        #             for j in range(iteration_per_epoch):
-        #                 batch_idx = random.sample(range(X.shape[0]), batch_size)
-                
-        #                 _,latent, imp_loss = sess.run([self.pretrain_op,self.h ,self.imp_loss],
-        #                 feed_dict= {self.x: X[batch_idx],
-        #                     self.unscale_x: unscale_X[batch_idx],
-        #                     self.non_zero_mask: nonzero_mask[batch_idx],
-        #                     self.x_count: count_X[batch_idx],
-        #                     })
-        #                 latent_repre[batch_idx] = latent
-            
-        #             h,sm  = sess.run([self.h,self.select_m],
-        #                         feed_dict={
-        #                             self.x: X,
-        #                             self.unscale_x: unscale_X,
-        #                             })
-
-        #             latent_repre = np.nan_to_num(latent_repre)
-        #             if L2:
-        #                 latent_repre = normalize(latent_repre)
-        #             if inherit_centroids:
-        #                 kmeans = KMeans(n_clusters=n_clusters, init=pre_clusters, n_init=1)
-        #                 kmeans.fit(latent_repre)
-        #                 pre_clusters=kmeans.cluster_centers_
-        #             print(pretrain_epochs,i,'imputation loss',imp_loss)
-
-        #         ax1 = fig.add_subplot(2, 2, 3).title.set_text("Step2:Imputation")
-        #         _scatter(latent_repre,Y_target,Z)
-
-        # if 0:
-        #     print("begin model pretrain(Imputation)")
-        #     #X = latent_repre
-        #     for i in range(pretrain_epochs):
-        #         for j in range(iteration_per_epoch):
-        #             batch_idx = random.sample(range(X.shape[0]), batch_size)
-            
-        #             _,latent, imp_loss = sess.run([self.pretrain_op,self.h ,self.imp_loss],
-        #             feed_dict= {self.x: X[batch_idx],
-        #                 self.unscale_x: unscale_X[batch_idx],
-        #                 self.non_zero_mask: nonzero_mask[batch_idx],
-        #                 self.x_count: count_X[batch_idx],
-        #                 })
-        #             latent_repre[batch_idx] = latent
-        
-        #         h,sm  = sess.run([self.h,self.select_m],
-        #                     feed_dict={
-        #                         self.x: X,
-        #                         self.unscale_x: unscale_X,
-        #                         })
-        #         latent_repre = np.nan_to_num(latent_repre)
-        #         if L2:
-        #             latent_repre = normalize(latent_repre)
-        #         if inherit_centroids:
-        #             kmeans = KMeans(n_clusters=n_clusters, init=pre_clusters, n_init=1)
-        #             kmeans.fit(latent_repre)
-        #             pre_clusters=kmeans.cluster_centers_
-        #         print(pretrain_epochs,i,'imputation loss',imp_loss)
-
-        #     ax1 = fig.add_subplot(2, 2, 3).title.set_text("Step1:Imputation")
-        #     _scatter(latent_repre,Y_target,Z)
-
-        
-        # if 0:
-        #     print("begin model pretrain(Batch effect)") 
-        #     for i in range(pretrain_epochs):
-        #         for j in range(iteration_per_epoch):
-        #             batch_idx = random.sample(range(latent_repre.shape[0]), batch_size)
-            
-        #             _,latent, mmd_loss= sess.run([self.mmd_op,self.h,self.mmd_loss],
-        #             feed_dict= {
-        #                         self.x: latent_repre[batch_idx],
-        #                         self.batch_labels:Z[batch_idx],
-        #                         self.Y_labels:Y_target[batch_idx]
-        #                     })
-        #             latent_repre[batch_idx] = latent
-        #     print(pretrain_epochs,i,'Batch loss',mmd_loss)
-
-        #     ax1 = fig.add_subplot(2, 2, 4).title.set_text("Step2:MMD")
-        #     _scatter(latent_repre,Y_target,Z)
-        
-        # 显示图像
-        save_dir = "D:/Imputation+Batcheffect_R"
-        if inherit_centroids:
-            save_dir+="_inherit_centroids"
-        if L2:
-            save_dir+="_L2"
-        save_dir+=".jpg"
-        print("save_dir:",save_dir)
-        plt.savefig(save_dir)
-        #plt.show()
+            fig = draw_TSNE(fig, latent_repre,Y_target,Z,index=3,subtitle="MMD",bSave= True,_inherit_centroids = inherit_centroids,_L2 = L2 )
 
         print(unscale_X.shape)
         print(unscale_test_X.shape)
@@ -623,7 +494,7 @@ class Model(object):
             latent_repre = normalize(latent_repre)
         
         if 'experiment' in adata.obs:  #MARS
-            Y_pred = self.Build_MARS(X,unscale_X,nonzero_mask,count_X,sess,latent_repre,Exp,Y_target)
+            Y_pred = self.Build_MARS(X,unscale_X,nonzero_mask,count_X,sess,latent_repre,Z,Y_target)
         else:
             print("Tradition Way")
             if os.name == "nt":
@@ -650,7 +521,8 @@ class Model(object):
             kmeans.fit(latent_repre)
             cluster_centers = kmeans.cluster_centers_
             # target_AMI = np.around(adjusted_mutual_info_score(Y_target, Y_pred), 4)
-       
+        
+        fig = draw_TSNE(fig, latent_repre,Y_target,Z,index=3,subtitle="Clustering",_inherit_centroids = inherit_centroids,_L2 = L2,bSave= True)
         print("Y_pred",Y_pred)
         print("Y_target",Y_target)
         target_ARI = np.around(adjusted_rand_score(Y_target, Y_pred), 4)
@@ -664,8 +536,6 @@ class Model(object):
                         self.non_zero_mask:np.concatenate([nonzero_mask,unscale_test_X],axis=0) 
                         }))
 
-# #        return target_accuracy, target_ARI, annotated_target_accuracy, target_prediction_matrix
-#         return Y_pred
         # [target_AMI, target_ARI, CHS, DBS, target_CPS, target_NMI]
         return imX, Y_pred, imX_df, select_m_df, select_w_df
 
@@ -714,8 +584,6 @@ class Model(object):
             sub_latent = encoded_tr[index]
             sub_landmk_tr = np.expand_dims(landmk_tr[j],axis = 0)
             sub_landmk_tr_labels = landmk_tr_labels[index]
-            # print("encoder_test.shape:",encoded_test.shape)
-            # print("landmk_test.shape:",landmk_test.shape)
 
             _,latent, mars_loss,tr_dist,test_dist = sess.run([self.mars_op,self.h ,self.mars_loss, self.tr_dist, self.test_dist],
             feed_dict= {self.x: X[index],
@@ -729,17 +597,6 @@ class Model(object):
                     })
 
             encoded_tr[index] = latent
-
-            # print("sub_latent.shape:",sub_latent.shape)
-            # print("landmk_tr.shape:",landmk_tr.shape)
-            # print("encoded_test.shape:",encoded_test.shape)
-            # print("landmk_test.shape:",landmk_test.shape)
-            # print("tr_dist.shape:",tr_dist.shape)
-            # print("tr_dist:",tr_dist)
-            # print("test_dist.shape:",test_dist.shape)
-            # print("test_dist:",test_dist)
-            # print("mars_loss.shape",mars_loss.shape)
-            # print("mars_loss:",mars_loss)
 
             #annotated experiment
             _,cluster_centers = self.compute_kmean(latent,len(np.unique(sub_landmk_tr_labels)),sub_landmk_tr)
@@ -771,12 +628,10 @@ class Model(object):
             if exp == unannotated_exp: # unannotated experiments
                 encoded_test.append(latent_uni)
                 landmk_test.append(cluster_centers)
-                #landmk_test_labels.append(Y_pred)
                 landmk_test_labels.append(Y_target[index])
             else:
                 encoded_tr.append(latent_uni)
                 landmk_tr.append(cluster_centers)
-                #landmk_tr_labels.append(Y_pred)
                 landmk_tr_labels.append(Y_target[index])
         
         encoded_tr = np.squeeze(np.array(encoded_tr))
@@ -785,8 +640,6 @@ class Model(object):
         landmk_test  = np.squeeze(np.array(landmk_test))
         landmk_tr_labels = np.squeeze(np.array(landmk_tr_labels))
         landmk_test_labels = np.squeeze(np.array(landmk_test_labels))
-        #print("landmk_tr:",landmk_tr.shape)
-        #print("landmk_test:",landmk_test.shape)
 
         cell_name_mappings = np.unique(landmk_tr_labels)
         print("cell_name_mappings:",cell_name_mappings)
@@ -809,7 +662,6 @@ class Model(object):
             print('\nCluster label: {}'.format(str(ytest)))
             idx = np.where(ypred_test==ytest)
             subset_encoded = encoded_test[idx[0],:]
-            #print("subset_encoded.shape",subset_encoded.shape)
             mean = np.expand_dims(np.mean(subset_encoded, axis=0),0)
             
             sigma  = self.estimate_sigma(subset_encoded)
@@ -843,44 +695,53 @@ class Model(object):
                 
         return interp_names
 
-def _scatter(X,Y,Z):
+def draw_TSNE(fig,X,Y,Z,index = 1,subtitle = "",columns = 2, rows = 2,_inherit_centroids = False, _L2= False, bSave = False):
     _marker = ['x','s','D','*']
     _color = ['r','g','b','y','m','c','k']
-    #plt.scatter(y[:, 0], y[:, 1], c=Y_target,s = Z*100+10, cmap=plt.cm.Spectral,alpha=0.6)
     ts = sklearn.manifold.TSNE(n_components=2, init='pca', random_state=0)
     x = ts.fit_transform(X)
-    Z = np.array(Z, dtype=int)
     Y = np.array(Y, dtype=int)
-    for i in range(len(Y)):
-        plt.scatter(x[i, 0], x[i, 1], c=_color[Y[i]],marker=_marker[Z[i]],alpha=0.6)
+
+    sc_types_set, sc_types_labels = np.unique(Z, return_inverse=True)
+    fig.add_subplot(columns, rows, index).title.set_text("Stage " + str(index) + ": " + subtitle)
+    sample_size = len(Y)
+    if len(np.unique(Y)) > len(_color):
+        for i in range(sample_size):
+            plt.scatter(x[i, 0], x[i, 1], c = Y[i],vmin=0, vmax=20,cmap=plt.cm.get_cmap('RdYlBu'),marker=_marker[sc_types_labels[i]],alpha=0.6)
+    else:
+        for i in range(sample_size):
+            plt.scatter(x[i, 0], x[i, 1], c=_color[Y[i]],marker=_marker[sc_types_labels[i]],alpha=0.6)
+
+    if bSave == True:
+        save_dir = "D:/Result"
+        if _inherit_centroids:
+            save_dir+="_inherit_centroids"
+        if _L2:
+            save_dir+="_L2"
+        save_dir+=".jpg"
+        print("save_dir:",save_dir)
+        plt.savefig(save_dir)
+        #plt.show()
+    
+    return fig
 
 import numpy as np
 import sklearn
 from sklearn import manifold
 import matplotlib.pyplot as plt
-def draw_TSNE(x,label,batch,dir,index = 1):
-    # 创建自定义图像
-    fig = plt.figure(figsize=(8, 8))		# 指定图像的宽和高
-    plt.suptitle("Dimensionality Reduction and Visualization of Embedding ", fontsize=14)		# 自定义图像名称
+# def draw_TSNE(x,label,batch,dir,index = 1):
+#     # 创建自定义图像
+#     fig = plt.figure(figsize=(8, 8))		# 指定图像的宽和高
+#     plt.suptitle("Dimensionality Reduction and Visualization of Embedding ", fontsize=14)		# 自定义图像名称
     
-    # t-SNE的降维与可视化
-    ts = sklearn.manifold.TSNE(n_components=2, init='pca', random_state=0)
-    # 训练模型
-    y = ts.fit_transform(x)
-    ax1 = fig.add_subplot(2, 2, index)
-    #Batch 1
-    #plt.scatter(y[0:8568, 0], y[0:8568, 1], c=label[0:8568], marker = 'o' , cmap=plt.cm.Spectral)
-    #Batch 2
-    #plt.scatter(y[8569:9844, 0], y[8569:9844, 1], c=label[8569:9844], marker = 'v', cmap=plt.cm.Spectral)
-    #Batch 3
-    #plt.scatter(y[9845:12293, 0], y[9845:12293, 1], c=label[9845:12293], marker = '*', cmap=plt.cm.Spectral)
-    #Batch 4
-    #plt.scatter(y[:, 0], y[:, 1], c=label, marker = '4', cmap=plt.cm.Spectral)
-    #Batch 5
-    #plt.scatter(y[:, 0], y[:, 1], c=label, marker = '8', cmap=plt.cm.Spectral)
-    plt.scatter(y[:, 0], y[:, 1], c=label, cmap=plt.cm.Spectral)
-    ax1.set_title('t-SNE Curve', fontsize=14)
-    # 显示图像
-    print("dir",dir)
-    plt.savefig(dir)
-    #plt.show()
+#     # t-SNE的降维与可视化
+#     ts = sklearn.manifold.TSNE(n_components=2, init='pca', random_state=0)
+#     # 训练模型
+#     y = ts.fit_transform(x)
+#     ax1 = fig.add_subplot(2, 2, index)
+#     plt.scatter(y[:, 0], y[:, 1], c=label, cmap=plt.cm.Spectral)
+#     ax1.set_title('t-SNE Curve', fontsize=14)
+#     # 显示图像
+#     print("dir",dir)
+#     plt.savefig(dir)
+#     #plt.show()

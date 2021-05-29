@@ -102,6 +102,7 @@ if __name__ == "__main__":
     elif dataset_dir == "simulation_data":
         adata, adata_unscaled, adata_cnt = load_simdata_datasets(data_dir, highly_genes_num, generate_files)
     elif dataset_dir == "cellbench_kolod_pollen":
+        print("test000")
         adata, adata_unscaled, adata_cnt = load_cellbench_datasets(data_dir, highly_genes_num, generate_files)
     #split_percent=int(1*len(adata.X))
     split_percent = max(adata.X.shape[0],adata.X.shape[1])

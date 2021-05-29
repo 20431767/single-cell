@@ -1,9 +1,9 @@
 #$repeat_num=10
 $repeat_num=1
 #$data_dir="J:\cgi_datasets"
-$data_dir="D:\HKBU\Course\Research\Git\single-cell\Desktop\Bakup\research\project\ge_code2_js_v0.2\data\"
-#dataset_dirs="cellbench_kolod_pollen"
-$dataset_dirs = "simulation_data"
+$data_dir="D:\HKBU\Course\Research\Git\SingleCell\single-cell\data\"
+#$dataset_dirs = "cellbench_kolod_pollen"  #MARS dataset
+$dataset_dirs = "simulation_data"       # batch-effect dataset
 #$dataset_dirs="human_pancreas", "human_progenitor"
 #$dataset_dirs="human_pancreas", "human_progenitor", "mouse_cortex", "human_melanoma", "mouse_stem", "mouse_pancreas", "mouse_blastomeres", "human_cell_line", "human_colorectal_cancer", "mouse_embryos", "mouse_pancreatic_circulating_tumor", "human_embryos"
 #$dataset_dirs='mars_skin', 'mars_limb_muscle', 'mars_spleen', 'mars_trachea', 'mars_tongue', 'mars_thymus', 'mars_bladder', 'mars_liver', 'mars_mammary_gland'

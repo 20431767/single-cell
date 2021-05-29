@@ -701,8 +701,9 @@ def load_simdata_datasets(data_dir, highly_genes=2000, generate_files=False):
         'splatter_benchmark_simul6_dropout_025_b1_80_b2_400'
         ]
 
+        #for f in files[:]:
         sc_df = pd.read_csv(os.path.join(data_dir, dataset_dir, files[0],'counts.csv'),index_col=0, low_memory=False).T
-        sc_anno = pd.read_csv(os.path.join(data_dir, dataset_dir, files[1],'cells_info.csv'), low_memory=False)
+        sc_anno = pd.read_csv(os.path.join(data_dir, dataset_dir, files[0],'cells_info.csv'), low_memory=False)
         sc_anno_df = sc_anno.iloc[:,3]
         sc_batch   = sc_anno.iloc[:,2]
 
